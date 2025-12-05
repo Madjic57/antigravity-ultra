@@ -54,6 +54,9 @@ class Config:
     groq_api_key: Optional[str] = field(
         default_factory=lambda: os.getenv("GROQ_API_KEY")
     )
+    huggingface_api_key: Optional[str] = field(
+        default_factory=lambda: os.getenv("HUGGINGFACE_API_KEY")
+    )
     
     # Default models
     default_model: str = "llama-3.1-70b-versatile"

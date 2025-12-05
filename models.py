@@ -213,7 +213,7 @@ class ModelOrchestrator:
     def __init__(self):
         self.groq = GroqClient()
         self.ollama = OllamaClient()
-        self.huggingface = HuggingFaceClient()  # FREE fallback
+        self.huggingface = HuggingFaceClient(api_key=config.huggingface_api_key)  # FREE fallback/Paid with key
         self._ollama_available = None
         print(f"[Orchestrator] Initialized - Groq: {self.groq.is_available()}, HuggingFace: {self.huggingface.is_available()}")
     
