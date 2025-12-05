@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import json
 
 from config import config, MODELS
+from huggingface_client import HuggingFaceClient
 
 
 @dataclass
@@ -212,7 +213,9 @@ class ModelOrchestrator:
     def __init__(self):
         self.groq = GroqClient()
         self.ollama = OllamaClient()
+        self.huggingface = HuggingFaceClient()  # FREE fallback
         self._ollama_available = None
+        print(f"[Orchestrator] Initialized - Groq: {self.groq.is_available()}, HuggingFace: {self.huggingface.is_available()}")
     
     async def get_available_models(self) -> Dict[str, List[str]]:
         """Get all available models by provider"""
@@ -248,7 +251,15 @@ class ModelOrchestrator:
             try:
                 return await self.ollama.chat(messages, ollama_model, temperature)
             except Exception as e:
-                print(f"Ollama error: {e}")
+                print(f"Ollama error: {e}, trying HuggingFace...")
+        
+        # Try HuggingFace (FREE fallback - always available)
+        if self.huggingface.is_available():
+            print("[Orchestrator] Using HuggingFace free inference...")
+            try:
+                return await self.huggingface.chat(messages)
+            except Exception as e:
+                print(f"HuggingFace error: {e}")
         
         raise RuntimeError("No LLM provider available")
     
@@ -274,15 +285,29 @@ class ModelOrchestrator:
         # Try Ollama
         if await self.ollama.is_available():
             ollama_model = model.replace("ollama/", "") if model.startswith("ollama/") else "llama3.1"
-            async for chunk in self.ollama.chat_stream(messages, ollama_model, temperature):
-                yield chunk
-            return
+            try:
+                async for chunk in self.ollama.chat_stream(messages, ollama_model, temperature):
+                    yield chunk
+                return
+            except Exception as e:
+                print(f"Ollama stream error: {e}, trying HuggingFace...")
+        
+        # Try HuggingFace (FREE fallback - always available)
+        if self.huggingface.is_available():
+            print("[Orchestrator] Using HuggingFace free inference...")
+            try:
+                async for chunk in self.huggingface.chat_stream(messages):
+                    yield chunk
+                return
+            except Exception as e:
+                print(f"HuggingFace stream error: {e}")
         
         raise RuntimeError("No LLM provider available for streaming")
     
     async def close(self):
         await self.groq.close()
         await self.ollama.close()
+        await self.huggingface.close()
 
 
 # Global orchestrator instance
