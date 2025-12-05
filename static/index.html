@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Antigravity Ultra</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">⚡</span>
+                    <span class="logo-text">Antigravity Ultra</span>
+                </div>
+            </div>
+            
+            <button class="new-chat-btn" onclick="newConversation()">
+                <span class="btn-icon">+</span>
+                Nouvelle conversation
+            </button>
+            
+            <div class="conversations-list" id="conversationsList">
+                <!-- Conversations will be loaded here -->
+            </div>
+            
+            <div class="sidebar-footer">
+                <div class="model-selector">
+                    <label>Modèle</label>
+                    <select id="modelSelect">
+                        <option value="llama-3.1-70b-versatile">Llama 3.1 70B (Rapide)</option>
+                        <option value="llama-3.1-8b-instant">Llama 3.1 8B (Ultra-rapide)</option>
+                        <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
+                    </select>
+                </div>
+                <div class="agent-toggle">
+                    <label>
+                        <input type="checkbox" id="agentMode" checked>
+                        <span>Mode Agent (outils)</span>
+                    </label>
+                </div>
+            </div>
+        </aside>
+        
+        <!-- Main Chat Area -->
+        <main class="chat-container">
+            <div class="chat-header">
+                <h1 id="chatTitle">Nouvelle conversation</h1>
+                <div class="status-indicator" id="statusIndicator">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Prêt</span>
+                </div>
+            </div>
+            
+            <div class="messages-container" id="messagesContainer">
+                <div class="welcome-message">
+                    <div class="welcome-icon">🚀</div>
+                    <h2>Bienvenue sur Antigravity Ultra</h2>
+                    <p>IA autonome ultra-performante avec capacités d'agent</p>
+                    <div class="capabilities">
+                        <div class="capability">
+                            <span class="cap-icon">🔍</span>
+                            <span>Recherche Web</span>
+                        </div>
+                        <div class="capability">
+                            <span class="cap-icon">📁</span>
+                            <span>Fichiers</span>
+                        </div>
+                        <div class="capability">
+                            <span class="cap-icon">💻</span>
+                            <span>Code Python</span>
+                        </div>
+                        <div class="capability">
+                            <span class="cap-icon">🧠</span>
+                            <span>Mémoire</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="input-container">
+                <div class="input-wrapper">
+                    <textarea 
+                        id="messageInput" 
+                        placeholder="Écrivez votre message..." 
+                        rows="1"
+                        onkeydown="handleKeyDown(event)"
+                    ></textarea>
+                    <button class="send-btn" onclick="sendMessage()" id="sendBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 9L11 13"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="input-footer">
+                    <span>Antigravity Ultra • Llama 3.1 via Groq</span>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+</html>
