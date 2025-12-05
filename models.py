@@ -29,14 +29,25 @@ class GroqClient:
     
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or config.groq_api_key
-        self.client = httpx.AsyncClient(
-            base_url=self.BASE_URL,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            },
-            timeout=60.0
-        )
+        self._available = self.api_key is not None and len(self.api_key) > 0
+        
+        if self._available:
+            self.client = httpx.AsyncClient(
+                base_url=self.BASE_URL,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                },
+                timeout=60.0
+            )
+            print(f"[Groq] API key found, Groq client initialized")
+        else:
+            self.client = None
+            print(f"[Groq] No API key found (GROQ_API_KEY not set)")
+    
+    def is_available(self) -> bool:
+        """Check if Groq API key is configured"""
+        return self._available
     
     async def chat(
         self,
@@ -46,6 +57,8 @@ class GroqClient:
         max_tokens: int = 4096
     ) -> ModelResponse:
         """Send a chat completion request"""
+        if not self._available:
+            raise RuntimeError("Groq API key not configured")
         response = await self.client.post(
             "/chat/completions",
             json={
@@ -73,6 +86,8 @@ class GroqClient:
         max_tokens: int = 4096
     ) -> AsyncGenerator[str, None]:
         """Stream a chat completion"""
+        if not self._available:
+            raise RuntimeError("Groq API key not configured")
         async with self.client.stream(
             "POST",
             "/chat/completions",
@@ -220,8 +235,8 @@ class ModelOrchestrator:
         """Send a chat request to the best available model"""
         model = model or config.default_model
         
-        # Try Groq first (fastest)
-        if model in MODELS and MODELS[model].provider == "groq":
+        # Try Groq first (if API key configured)
+        if self.groq.is_available() and model in MODELS and MODELS[model].provider == "groq":
             try:
                 return await self.groq.chat(messages, model, temperature, max_tokens)
             except Exception as e:
@@ -247,8 +262,8 @@ class ModelOrchestrator:
         """Stream a chat response from the best available model"""
         model = model or config.default_model
         
-        # Try Groq first
-        if model in MODELS and MODELS[model].provider == "groq":
+        # Try Groq first (if API key configured)
+        if self.groq.is_available() and model in MODELS and MODELS[model].provider == "groq":
             try:
                 async for chunk in self.groq.chat_stream(messages, model, temperature, max_tokens):
                     yield chunk
