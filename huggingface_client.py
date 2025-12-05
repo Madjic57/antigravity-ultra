@@ -22,7 +22,8 @@ class ModelResponse:
 class HuggingFaceClient:
     """Client for HuggingFace Inference API (FREE, no API key required)"""
     
-    DEFAULT_MODEL = "mistralai/Mistral-7B-Instruct-v0.3"
+    # Use Zephyr-7B which is available for free inference
+    DEFAULT_MODEL = "HuggingFaceH4/zephyr-7b-beta"
     
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key
