@@ -1,5 +1,6 @@
 # Antigravity Ultra - Memory System
-import sqlite3
+import databases
+import sqlalchemy
 import json
 from datetime import datetime
 from typing import List, Dict, Any, Optional
@@ -31,67 +32,68 @@ class Conversation:
     message_count: int = 0
 
 
+# === Database Schema ===
+metadata = sqlalchemy.MetaData()
+
+conversations = sqlalchemy.Table(
+    "conversations",
+    metadata,
+    sqlalchemy.Column("id", sqlalchemy.String, primary_key=True),
+    sqlalchemy.Column("title", sqlalchemy.String, default=""),
+    sqlalchemy.Column("created_at", sqlalchemy.DateTime, default=datetime.utcnow),
+    sqlalchemy.Column("updated_at", sqlalchemy.DateTime, default=datetime.utcnow),
+)
+
+messages = sqlalchemy.Table(
+    "messages",
+    metadata,
+    sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True, autoincrement=True),
+    sqlalchemy.Column("conversation_id", sqlalchemy.String, sqlalchemy.ForeignKey("conversations.id"), nullable=False),
+    sqlalchemy.Column("role", sqlalchemy.String, nullable=False),
+    sqlalchemy.Column("content", sqlalchemy.Text, nullable=False),
+    sqlalchemy.Column("timestamp", sqlalchemy.DateTime, default=datetime.utcnow),
+    sqlalchemy.Column("metadata", sqlalchemy.Text, default="{}"),
+)
+
+
 class MemoryManager:
-    """Persistent memory storage for conversations"""
+    """Persistent memory storage (Async - SQLite/PostgreSQL)"""
     
-    def __init__(self, db_path: Optional[Path] = None):
-        self.db_path = db_path or config.db_path
-        self._init_db()
+    def __init__(self):
+        self.database_url = config.database_url
+        self.database = databases.Database(self.database_url)
+        print(f"[Memory] Initialized with {self.database_url.split(':')[0]} database")
     
-    def _init_db(self):
-        """Initialize the database schema"""
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+    async def connect(self):
+        """Connect to the database and create tables"""
+        await self.database.connect()
         
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
+        # Create tables (only works for SQLite/Postgres with proper permissions)
+        # using sync SQLAlchemy engine for schema creation
+        engine = sqlalchemy.create_engine(self.database_url)
+        metadata.create_all(engine)
         
-        # Conversations table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS conversations (
-                id TEXT PRIMARY KEY,
-                title TEXT DEFAULT '',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # Messages table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                conversation_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                metadata TEXT DEFAULT '{}',
-                FOREIGN KEY (conversation_id) REFERENCES conversations(id)
-            )
-        """)
-        
-        # Create indexes
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_messages_conversation 
-            ON messages(conversation_id)
-        """)
-        
-        conn.commit()
-        conn.close()
+    async def disconnect(self):
+        """Disconnect from the database"""
+        await self.database.disconnect()
     
-    def create_conversation(self, conv_id: str, title: str = "") -> str:
+    async def create_conversation(self, conv_id: str, title: str = "") -> str:
         """Create a new conversation"""
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            "INSERT OR IGNORE INTO conversations (id, title) VALUES (?, ?)",
-            (conv_id, title)
+        query = conversations.insert().values(
+            id=conv_id,
+            title=title,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
         )
-        
-        conn.commit()
-        conn.close()
-        return conv_id
+        try:
+            await self.database.execute(query)
+            return conv_id
+        except Exception as e:
+            # Ignore if exists (could be race condition or re-run)
+            print(f"[Memory] Create conversation error (ignored): {e}")
+            return conv_id
     
-    def add_message(
+    async def add_message(
         self,
         conversation_id: str,
         role: str,
@@ -99,167 +101,108 @@ class MemoryManager:
         metadata: Optional[Dict[str, Any]] = None
     ) -> int:
         """Add a message to a conversation"""
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
-        
         # Ensure conversation exists
-        cursor.execute(
-            "INSERT OR IGNORE INTO conversations (id) VALUES (?)",
-            (conversation_id,)
-        )
+        await self.create_conversation(conversation_id)
         
         # Insert message
-        cursor.execute(
-            """INSERT INTO messages (conversation_id, role, content, metadata)
-               VALUES (?, ?, ?, ?)""",
-            (conversation_id, role, content, json.dumps(metadata or {}))
+        query = messages.insert().values(
+            conversation_id=conversation_id,
+            role=role,
+            content=content,
+            timestamp=datetime.utcnow(),
+            metadata=json.dumps(metadata or {})
         )
+        message_id = await self.database.execute(query)
         
         # Update conversation timestamp
-        cursor.execute(
-            "UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (conversation_id,)
-        )
-        
-        message_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
+        update_query = conversations.update().where(
+            conversations.c.id == conversation_id
+        ).values(updated_at=datetime.utcnow())
+        await self.database.execute(update_query)
         
         return message_id
     
-    def get_messages(
+    async def get_messages(
         self,
         conversation_id: str,
         limit: Optional[int] = None
     ) -> List[ConversationMessage]:
         """Get messages from a conversation"""
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
-        
-        query = """
-            SELECT id, conversation_id, role, content, timestamp, metadata
-            FROM messages
-            WHERE conversation_id = ?
-            ORDER BY timestamp ASC
-        """
+        query = messages.select().where(
+            messages.c.conversation_id == conversation_id
+        ).order_by(messages.c.timestamp.asc())
         
         if limit:
-            query += f" LIMIT {limit}"
-        
-        cursor.execute(query, (conversation_id,))
-        rows = cursor.fetchall()
-        conn.close()
-        
-        messages = []
-        for row in rows:
-            messages.append(ConversationMessage(
-                id=row[0],
-                conversation_id=row[1],
-                role=row[2],
-                content=row[3],
-                timestamp=datetime.fromisoformat(row[4]),
-                metadata=json.loads(row[5]) if row[5] else {}
-            ))
-        
-        return messages
-    
-    def get_recent_messages(
-        self,
-        conversation_id: str,
-        count: int = 10
-    ) -> List[ConversationMessage]:
-        """Get the most recent messages from a conversation"""
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT id, conversation_id, role, content, timestamp, metadata
-            FROM messages
-            WHERE conversation_id = ?
-            ORDER BY timestamp DESC
-            LIMIT ?
-        """, (conversation_id, count))
-        
-        rows = cursor.fetchall()
-        conn.close()
-        
-        messages = []
-        for row in reversed(rows):  # Reverse to get chronological order
-            messages.append(ConversationMessage(
-                id=row[0],
-                conversation_id=row[1],
-                role=row[2],
-                content=row[3],
-                timestamp=datetime.fromisoformat(row[4]),
-                metadata=json.loads(row[5]) if row[5] else {}
-            ))
-        
-        return messages
-    
-    def list_conversations(self, limit: int = 50) -> List[Conversation]:
-        """List all conversations"""
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT c.id, c.title, c.created_at, c.updated_at,
-                   COUNT(m.id) as message_count
-            FROM conversations c
-            LEFT JOIN messages m ON c.id = m.conversation_id
-            GROUP BY c.id
-            ORDER BY c.updated_at DESC
-            LIMIT ?
-        """, (limit,))
-        
-        rows = cursor.fetchall()
-        conn.close()
+            query = query.limit(limit)
+            
+        rows = await self.database.fetch_all(query)
         
         return [
-            Conversation(
-                id=row[0],
-                title=row[1] or "",
-                created_at=datetime.fromisoformat(row[2]),
-                updated_at=datetime.fromisoformat(row[3]),
-                message_count=row[4]
+            ConversationMessage(
+                id=row["id"],
+                conversation_id=row["conversation_id"],
+                role=row["role"],
+                content=row["content"],
+                timestamp=row["timestamp"],
+                metadata=json.loads(row["metadata"]) if row["metadata"] else {}
             )
             for row in rows
         ]
     
-    def delete_conversation(self, conversation_id: str):
-        """Delete a conversation and all its messages"""
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
+    async def list_conversations(self, limit: int = 50) -> List[Conversation]:
+        """List all conversations"""
+        # Simple list without join to be safer across DBs initially
+        query = conversations.select().order_by(
+            conversations.c.updated_at.desc()
+        ).limit(limit)
         
-        cursor.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
-        cursor.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+        rows = await self.database.fetch_all(query)
         
-        conn.commit()
-        conn.close()
+        result = []
+        for row in rows:
+            # Get message count separately
+            count_query = sqlalchemy.select([sqlalchemy.func.count()]).select_from(messages).where(
+                messages.c.conversation_id == row["id"]
+            )
+            count = await self.database.fetch_val(count_query)
+            
+            result.append(Conversation(
+                id=row["id"],
+                title=row["title"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                message_count=count or 0
+            ))
+        return result
     
-    def search_messages(self, query: str, limit: int = 20) -> List[ConversationMessage]:
+    async def delete_conversation(self, conversation_id: str):
+        """Delete a conversation"""
+        # Delete messages first
+        await self.database.execute(
+            messages.delete().where(messages.c.conversation_id == conversation_id)
+        )
+        # Delete conversation
+        await self.database.execute(
+            conversations.delete().where(conversations.c.id == conversation_id)
+        )
+    
+    async def search_messages(self, query_text: str, limit: int = 20) -> List[ConversationMessage]:
         """Search messages by content"""
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
+        # Use simple LIKE query
+        query = messages.select().where(
+            messages.c.content.ilike(f"%{query_text}%")
+        ).order_by(messages.c.timestamp.desc()).limit(limit)
         
-        cursor.execute("""
-            SELECT id, conversation_id, role, content, timestamp, metadata
-            FROM messages
-            WHERE content LIKE ?
-            ORDER BY timestamp DESC
-            LIMIT ?
-        """, (f"%{query}%", limit))
-        
-        rows = cursor.fetchall()
-        conn.close()
+        rows = await self.database.fetch_all(query)
         
         return [
             ConversationMessage(
-                id=row[0],
-                conversation_id=row[1],
-                role=row[2],
-                content=row[3],
-                timestamp=datetime.fromisoformat(row[4]),
-                metadata=json.loads(row[5]) if row[5] else {}
+                id=row["id"],
+                conversation_id=row["conversation_id"],
+                role=row["role"],
+                content=row["content"],
+                timestamp=row["timestamp"],
+                metadata=json.loads(row["metadata"]) if row["metadata"] else {}
             )
             for row in rows
         ]
@@ -267,3 +210,4 @@ class MemoryManager:
 
 # Global memory instance
 memory = MemoryManager()
+

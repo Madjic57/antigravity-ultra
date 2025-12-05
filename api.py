@@ -45,13 +45,21 @@ app = FastAPI(
 
 # === API Endpoints ===
 
+@app.on_event("startup")
+async def startup():
+    """Connect to database on startup"""
+    await memory.connect()
+    print("[API] Database connected")
+
+
 @app.get("/api/health")
 async def health():
     """Health check endpoint"""
     return {
         "status": "healthy",
         "service": "Antigravity Ultra",
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "database": config.database_url.split(":")[0]
     }
 
 
@@ -78,14 +86,14 @@ async def list_models():
 async def create_conversation(data: ConversationCreate):
     """Create a new conversation"""
     conv_id = str(uuid.uuid4())
-    memory.create_conversation(conv_id, data.title)
+    await memory.create_conversation(conv_id, data.title)
     return {"conversation_id": conv_id, "title": data.title}
 
 
 @app.get("/api/conversations")
 async def list_conversations():
     """List all conversations"""
-    conversations = memory.list_conversations()
+    conversations = await memory.list_conversations()
     return {
         "conversations": [
             {
@@ -102,7 +110,7 @@ async def list_conversations():
 @app.get("/api/conversations/{conversation_id}")
 async def get_conversation(conversation_id: str):
     """Get a conversation with messages"""
-    messages = memory.get_messages(conversation_id)
+    messages = await memory.get_messages(conversation_id)
     return {
         "conversation_id": conversation_id,
         "messages": [
@@ -119,7 +127,7 @@ async def get_conversation(conversation_id: str):
 @app.delete("/api/conversations/{conversation_id}")
 async def delete_conversation(conversation_id: str):
     """Delete a conversation"""
-    memory.delete_conversation(conversation_id)
+    await memory.delete_conversation(conversation_id)
     return {"message": "Conversation deleted"}
 
 
@@ -140,7 +148,7 @@ async def websocket_chat(websocket: WebSocket):
             use_agent = request.get("use_agent", True)
             
             # Save user message
-            memory.add_message(conv_id, "user", message)
+            await memory.add_message(conv_id, "user", message)
             
             # Send conversation ID
             await websocket.send_json({
@@ -177,7 +185,7 @@ async def websocket_chat(websocket: WebSocket):
                         })
                 
                 # Save assistant response
-                memory.add_message(conv_id, "assistant", full_response)
+                await memory.add_message(conv_id, "assistant", full_response)
             else:
                 # Simple chat without tools
                 response = await agent.simple_chat(message, model)
@@ -189,7 +197,7 @@ async def websocket_chat(websocket: WebSocket):
                 })
                 
                 # Save response
-                memory.add_message(conv_id, "assistant", response)
+                await memory.add_message(conv_id, "assistant", response)
             
             # Signal completion
             await websocket.send_json({"type": "done"})
@@ -223,4 +231,5 @@ async def root():
 
 @app.on_event("shutdown")
 async def shutdown():
+    await memory.disconnect()
     await agent.close()

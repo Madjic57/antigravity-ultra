@@ -80,6 +80,15 @@ class Config:
     )
     
     @property
+    def database_url(self) -> str:
+        """Get database URL from environment or default to local SQLite"""
+        url = os.getenv("DATABASE_URL")
+        if url and url.startswith("postgres://"):
+            # Fix for SQLAlchemy which requires postgresql://
+            url = url.replace("postgres://", "postgresql://", 1)
+        return url or f"sqlite:///{self.db_path}"
+
+    @property
     def data_dir(self) -> Path:
         return self.base_dir / "data"
     
